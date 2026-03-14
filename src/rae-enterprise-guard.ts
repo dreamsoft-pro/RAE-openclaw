@@ -1,13 +1,21 @@
 import crypto from "node:crypto";
 
 // RAE Enterprise Guard & Memory Bridge for Node.js (TypeScript)
-// Hardened version with Domain White-listing and Prompt-Injection scrubbing logic
+// Hardened version with Intelligent Context Detection (RAEContextLocator Port)
 
 export interface GuardAuditOptions {
   operationName: string;
   impactLevel: "low" | "medium" | "high" | "critical";
   infoClass?: "public" | "internal" | "confidential" | "restricted" | "critical";
 }
+
+const TENANT_MAP: Record<string, string> = {
+  "screenwatcher_project": "66435998-b1d9-5521-9481-55a9fd10e014",
+  "dreamsoft_factory": "53717286-fe94-4c8f-baf9-c4d2758eb672",
+  "billboard-splitter": "67694908-0b76-58a9-979d-3db20071e34a",
+  "RAE-agentic-memory": "00000000-0000-0000-0000-000000000000",
+  "RAE-Suite": "00000000-0000-0000-0000-000000000000"
+};
 
 export class RAEEnterpriseFoundation {
   private moduleName: string;
@@ -28,14 +36,38 @@ export class RAEEnterpriseFoundation {
 
   constructor(moduleName: string) {
     this.moduleName = moduleName;
-    this.projectName = process.env.RAE_PROJECT_NAME || "rae-open-claw";
-    this.tenantId = process.env.RAE_TENANT_ID || "53717286-fe94-4c8f-baf9-c4d2758eb672"; 
+    this.projectName = this.detectProjectName();
+    this.tenantId = this.detectTenantId(this.projectName);
     this.apiUrl = process.env.RAE_API_URL || "http://rae-api-dev:8000";
+  }
+
+  private detectProjectName(): string {
+    if (process.env.RAE_PROJECT_NAME) return process.env.RAE_PROJECT_NAME;
+    
+    const cwd = process.cwd();
+    for (const folder of Object.keys(TENANT_MAP)) {
+      if (cwd.includes(folder)) return folder;
+    }
+    return "unnamed_rae_module";
+  }
+
+  private detectTenantId(projName: string): string {
+    if (process.env.RAE_TENANT_ID) return process.env.RAE_TENANT_ID;
+    
+    if (TENANT_MAP[projName]) {
+      return TENANT_MAP[projName];
+    }
+    
+    const cwd = process.cwd();
+    for (const [folder, uuid] of Object.entries(TENANT_MAP)) {
+      if (cwd.includes(folder)) return uuid;
+    }
+    
+    return "00000000-0000-0000-0000-000000000000";
   }
 
   /**
    * SEC-02: Prompt Injection Scrubber
-   * Removes known jailbreak attempts and instruction overrides.
    */
   public scrubPrompt(text: string): string {
     const dangerousPatterns = [
@@ -43,7 +75,7 @@ export class RAEEnterpriseFoundation {
       /\byou are now a\b/gi,
       /\bforget everything\b/gi,
       /\bsystem override\b/gi,
-      /<\|.*?\|>/g // Special tokens
+      /<\|.*?\|>/g 
     ];
     
     let cleaned = text;
@@ -53,8 +85,24 @@ export class RAEEnterpriseFoundation {
     return cleaned;
   }
 
+  /**
+   * SEC-03: Lean Model Selector
+   */
+  public getLeanModel(task: string): { modelId: string, tier: number } {
+    const isArchitectural = task.match(/\b(architecture|refactor|design|security|critical)\b/i);
+    const isComplex = task.length > 500 || task.includes("logic") || task.includes("bug");
+
+    if (isArchitectural) {
+      return { modelId: "premium_anthropic", tier: 3 }; 
+    }
+    if (isComplex) {
+      return { modelId: "local_llama", tier: 2 }; 
+    }
+    return { modelId: "local_qwen", tier: 1 }; 
+  }
+
   public async logEvent(content: string, humanLabel: string, metadata: Record<string, any> = {}, layer: string = "reflective") {
-    if (this.tenantId === "00000000-0000-0000-0000-000000000000") return;
+    if (this.tenantId === "00000000-0000-0000-0000-000000000000" && !this.projectName.includes("RAE")) return;
 
     const payload = {
       content,
@@ -66,7 +114,6 @@ export class RAEEnterpriseFoundation {
     };
 
     try {
-      // Background telemetry
       fetch(`${this.apiUrl}/v2/memories/`, {
         method: "POST",
         headers: {
@@ -79,13 +126,11 @@ export class RAEEnterpriseFoundation {
   }
 
   public enforceHardFrames(target: string, options: GuardAuditOptions) {
-    // 1. Block interactive shell commands
     const isInteractive = target.match(/\b(nano|vim|top|htop|ssh|ftp|telnet)\b/i);
     if (isInteractive) {
       throw new Error(`[RAE GUARD] FATAL: Interactive command detected. VIOLATION of NO_INTERACTIVE_COMMANDS contract.`);
     }
 
-    // 2. SEC-01: Exfiltration Control
     if (target.startsWith("fetch") || target.startsWith("scrape") || target.includes("http")) {
       try {
         const urlMatch = target.match(/https?:\/\/[^\s]+/);
@@ -94,12 +139,11 @@ export class RAEEnterpriseFoundation {
           const isAllowed = this.allowedDomains.some(domain => url.hostname.endsWith(domain));
           
           if (!isAllowed && options.infoClass !== "public") {
-            throw new Error(`[RAE GUARD] FATAL: Exfiltration attempt blocked. Domain '${url.hostname}' is not in the whitelist for ${options.infoClass} data.`);
+            throw new Error(`[RAE GUARD] FATAL: Exfiltration attempt blocked. Domain '${url.hostname}' is not in the whitelist.`);
           }
         }
       } catch (e: any) {
         if (e.message.includes("RAE GUARD")) throw e;
-        // Ignore URL parsing errors for non-URL commands
       }
     }
 
