@@ -1,4 +1,5 @@
 import { Type } from "@sinclair/typebox";
+import { globalGuard } from "../../rae-enterprise-guard.js";
 import { loadConfig } from "../../config/config.js";
 import { optionalStringEnum } from "../schema/typebox.js";
 import {
@@ -153,12 +154,17 @@ export function createSubagentsTool(opts?: { agentSessionKey?: string }): AnyAge
             error: resolved.error ?? "Unknown subagent target.",
           });
         }
-        const result = await steerControlledSubagentRun({
-          cfg,
-          controller,
-          entry: resolved.entry,
-          message,
-        });
+        const result = await globalGuard.auditedOperation(
+          { operationName: "a2a_steer_subagent", impactLevel: "medium", infoClass: "internal" },
+          async () => {
+            return await steerControlledSubagentRun({
+              cfg,
+              controller,
+              entry: resolved.entry,
+              message,
+            });
+          }
+        );
         return jsonResult({
           status: result.status,
           action: "steer",
